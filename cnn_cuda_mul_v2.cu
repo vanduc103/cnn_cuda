@@ -138,35 +138,16 @@ void convolution_v3(
    int NoImg)
 {
    // Store each work-item’s unique row and column
-   int x1 = blockIdx.x * blockDim.x + threadIdx.x; // N*N*D2*NoImg
+   int x1 = blockIdx.x * blockDim.x + threadIdx.x; // x1 is output index
 
    if (x1 < N*N*D2*NoImg) {
-        // Calculate index values
-        int n = x1/(N*N*D2); int tmp1 = x1 - n*(N*N*D2);
-        int d2 = tmp1/(N*N); int tmp2 = tmp1 - d2*(N*N);
-        int i = tmp2/N;
-        int j = tmp2-i*N;
-        
-        int oIdx = x1; //i*N + j + (N*N*d2) + (N*N*D2*n);
-        outputs[oIdx] = 0;
-
-        // Unroll 1 times
-        for (int t = 0; t < D1; t+=1) {
-            float sum = 0;
-            for (int k = 0; k < 3; k++) {
-                for (int l = 0; l < 3; l++) {
-                    int x = i + k - 1;
-                    int y = j + l - 1;
-                    if (x >= 0 && x < N && y >= 0 && y < N)
-                        sum += inputs[x*N + y + N*N*t + (N*N*D1*n)] * filters1[k*3 + l + (3*3 * (d2*D1 + t))];
-                }
-            }
-            outputs[oIdx] += sum;
-        }
-        // RELU
-        float bias = biases1[d2];
-        outputs[oIdx] = (outputs[oIdx] + bias > 0) ? (outputs[oIdx] + bias) : 0;
-    }
+        float sum = 0;
+        for (int i = 0; i < D1; i++) {
+            for (int j = 0; j < 3; j++)
+                for (int t = 0; t < 3; t++)
+                    sum += 
+        }     
+   }
 }
 
 
@@ -469,6 +450,11 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     w2 = network[28]; b2 = network[29];
     w3 = network[30]; b3 = network[31];
 
+    // view networks values
+    for (int i = 0; i < NETWORK_SIZES[0]; i++) {
+        printf("w1_1[%d] = %f\n", i, w1_1[i]);
+    }
+
     // Allocate vectors in device memory
     float *d_w1_1, *d_b1_1, *d_w1_2, *d_b1_2;
     float *d_w2_1, *d_b2_1, *d_w2_2, *d_b2_2;
@@ -570,9 +556,10 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     float *d_c4_1, *d_c4_2, *d_c4_3, *d_p4;
     float *d_c5_1, *d_c5_2, *d_c5_3, *d_p5;
     float *d_fc1, *d_fc2, *d_fc3;
-    /*cudaMalloc(&d_c1_1, batchImg * OUTPUT_SIZES[0] * sizeof(float));
-    cudaMalloc(&d_c1_2, batchImg * OUTPUT_SIZES[1] * sizeof(float));
-    cudaMalloc(&d_p1,   batchImg * OUTPUT_SIZES[2] * sizeof(float));
+    float *d1, *d2;
+    cudaMalloc(&d1, batchImg * OUTPUT_SIZES[0] * sizeof(float));
+    cudaMalloc(&d2, batchImg * OUTPUT_SIZES[1] * sizeof(float));
+    /*cudaMalloc(&d_p1,   batchImg * OUTPUT_SIZES[2] * sizeof(float));
     cudaMalloc(&d_c2_1, batchImg * OUTPUT_SIZES[3] * sizeof(float));
     cudaMalloc(&d_c2_2, batchImg * OUTPUT_SIZES[4] * sizeof(float));
     cudaMalloc(&d_p2,   batchImg * OUTPUT_SIZES[5] * sizeof(float));
@@ -614,93 +601,37 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
         cudaEventElapsedTime(&milliseconds, start, stop);
         data_transfer_time += milliseconds/1000;
 
-        cudaMalloc(&d_c1_1, batchImg * OUTPUT_SIZES[0] * sizeof(float));
-        convolution_layer_v2(d_image, d_c1_1, d_w1_1, d_b1_1, 64, 3, 32, batchImg);
+        convolution_layer_v2(d_image, d1, d_w1_1, d_b1_1, 64, 3, 32, batchImg);
+        convolution_layer_v2(d1, d2, d_w1_2, d_b1_2, 64, 64, 32, batchImg);
+        pooling_layer(d2, d1, 64, 16, batchImg);
 
-        cudaMalloc(&d_c1_2, batchImg * OUTPUT_SIZES[1] * sizeof(float));
-        convolution_layer_v2(d_c1_1, d_c1_2, d_w1_2, d_b1_2, 64, 64, 32, batchImg);
-        cudaFree(d_c1_1);
+        convolution_layer_v2(d2, d1, d_w2_1, d_b2_1, 128, 64, 16, batchImg);
+        convolution_layer_v2(d1, d2, d_w2_2, d_b2_2, 128, 128, 16, batchImg);
+        pooling_layer(d2, d1, 128, 8, batchImg);
 
-        cudaMalloc(&d_p1,   batchImg * OUTPUT_SIZES[2] * sizeof(float));
-        pooling_layer(d_c1_2, d_p1, 64, 16, batchImg);
-        cudaFree(d_c1_2);
+        convolution_layer_v2(d1, d2, d_w3_1, d_b3_1, 256, 128, 8, batchImg);
+        convolution_layer_v2(d2, d1, d_w3_2, d_b3_2, 256, 256, 8, batchImg);
+        convolution_layer_v2(d1, d2, d_w3_3, d_b3_3, 256, 256, 8, batchImg);
+        pooling_layer(d2, d1, 256, 4, batchImg);
 
-        cudaMalloc(&d_c2_1, batchImg * OUTPUT_SIZES[3] * sizeof(float));
-        convolution_layer_v2(d_p1, d_c2_1, d_w2_1, d_b2_1, 128, 64, 16, batchImg);
-        cudaFree(d_p1);
+        convolution_layer_v2(d1, d2, d_w4_1, d_b4_1, 512, 256, 4, batchImg);
+        convolution_layer_v2(d2, d1, d_w4_2, d_b4_2, 512, 512, 4, batchImg);
+        convolution_layer_v2(d1, d2, d_w4_3, d_b4_3, 512, 512, 4, batchImg);
+        pooling_layer(d2, d1, 512, 2, batchImg);
 
-        cudaMalloc(&d_c2_2, batchImg * OUTPUT_SIZES[4] * sizeof(float));
-        convolution_layer_v2(d_c2_1, d_c2_2, d_w2_2, d_b2_2, 128, 128, 16, batchImg);
-        cudaFree(d_c2_1);
+        convolution_layer_v2(d1, d2, d_w5_1, d_b5_1, 512, 512, 2, batchImg);
+        convolution_layer_v2(d2, d1, d_w5_2, d_b5_2, 512, 512, 2, batchImg);
+        convolution_layer_v2(d1, d2, d_w5_3, d_b5_3, 512, 512, 2, batchImg);
+        pooling_layer(d2, d1, 512, 1, batchImg);
 
-        cudaMalloc(&d_p2,   batchImg * OUTPUT_SIZES[5] * sizeof(float));
-        pooling_layer(d_c2_2, d_p2, 128, 8, batchImg);
-        cudaFree(d_c2_2);
-
-        cudaMalloc(&d_c3_1, batchImg * OUTPUT_SIZES[6] * sizeof(float));
-        convolution_layer_v2(d_p2, d_c3_1, d_w3_1, d_b3_1, 256, 128, 8, batchImg);
-        cudaFree(d_p2);
-
-        cudaMalloc(&d_c3_2, batchImg * OUTPUT_SIZES[7] * sizeof(float));
-        convolution_layer_v2(d_c3_1, d_c3_2, d_w3_2, d_b3_2, 256, 256, 8, batchImg);
-        cudaFree(d_c3_1);
-
-        cudaMalloc(&d_c3_3, batchImg * OUTPUT_SIZES[8] * sizeof(float));
-        convolution_layer_v2(d_c3_2, d_c3_3, d_w3_3, d_b3_3, 256, 256, 8, batchImg);
-        cudaFree(d_c3_2);
-
-        cudaMalloc(&d_p3, batchImg * OUTPUT_SIZES[9] * sizeof(float));
-        pooling_layer(d_c3_3, d_p3, 256, 4, batchImg);
-        cudaFree(d_c3_3);
-
-        cudaMalloc(&d_c4_1, batchImg * OUTPUT_SIZES[10] * sizeof(float));
-        convolution_layer_v2(d_p3, d_c4_1, d_w4_1, d_b4_1, 512, 256, 4, batchImg);
-        cudaFree(d_p3);
-
-        cudaMalloc(&d_c4_2, batchImg * OUTPUT_SIZES[11] * sizeof(float));
-        convolution_layer_v2(d_c4_1, d_c4_2, d_w4_2, d_b4_2, 512, 512, 4, batchImg);
-        cudaFree(d_c4_1);
-
-        cudaMalloc(&d_c4_3, batchImg * OUTPUT_SIZES[12] * sizeof(float));
-        convolution_layer_v2(d_c4_2, d_c4_3, d_w4_3, d_b4_3, 512, 512, 4, batchImg);
-        cudaFree(d_c4_2);
-
-        cudaMalloc(&d_p4, batchImg * OUTPUT_SIZES[13] * sizeof(float));
-        pooling_layer(d_c4_3, d_p4, 512, 2, batchImg);
-        cudaFree(d_c4_3);
-
-        cudaMalloc(&d_c5_1, batchImg * OUTPUT_SIZES[14] * sizeof(float));
-        convolution_layer_v2(d_p4, d_c5_1, d_w5_1, d_b5_1, 512, 512, 2, batchImg);
-        cudaFree(d_p4);
-
-        cudaMalloc(&d_c5_2, batchImg * OUTPUT_SIZES[15] * sizeof(float));
-        convolution_layer_v2(d_c5_1, d_c5_2, d_w5_2, d_b5_2, 512, 512, 2, batchImg);
-        cudaFree(d_c5_1);
-
-        cudaMalloc(&d_c5_3, batchImg * OUTPUT_SIZES[16] * sizeof(float));
-        convolution_layer_v2(d_c5_2, d_c5_3, d_w5_3, d_b5_3, 512, 512, 2, batchImg);
-        cudaFree(d_c5_2);
-
-        cudaMalloc(&d_p5, batchImg * OUTPUT_SIZES[17] * sizeof(float));
-        pooling_layer(d_c5_3, d_p5, 512, 1, batchImg);
-        cudaFree(d_c5_3);
-
-        cudaMalloc(&d_fc1, batchImg * OUTPUT_SIZES[18] * sizeof(float));
-        fc_layer(d_p5, d_fc1, d_w1, d_b1, 512, 512, batchImg);
-        cudaFree(d_p5);
-
-        cudaMalloc(&d_fc2,  batchImg * OUTPUT_SIZES[19] * sizeof(float));
-        fc_layer(d_fc1, d_fc2, d_w2, d_b2, 512, 512, batchImg);
-        cudaFree(d_fc1);
-
-        cudaMalloc(&d_fc3,  batchImg * OUTPUT_SIZES[20] * sizeof(float));
-        fc_layer(d_fc2, d_fc3, d_w3, d_b3, 10, 512, batchImg);
-        cudaFree(d_fc2);
+        fc_layer(d1, d2, d_w1, d_b1, 512, 512, batchImg);
+        fc_layer(d2, d1, d_w2, d_b2, 512, 512, batchImg);
+        fc_layer(d1, d2, d_w3, d_b3, 10, 512, batchImg);
 
         // Copy result from device memory to host memory
         float *fc3_mul  = alloc_layer(OUTPUT_SIZES[20] * batchImg);
         cudaEventRecord(start);
-        cudaMemcpy(fc3_mul, d_fc3, batchImg * OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(fc3_mul, d2, batchImg * OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         milliseconds = 0;
