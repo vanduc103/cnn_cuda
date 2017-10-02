@@ -476,7 +476,16 @@ const int OUTPUT_SIZES[] = {
     10
 };
 
-void cnn(float *images, float **network, int *labels, float *confidences, int num_images) {
+void print_matrix(float *matrix, int size, const char *desc) {
+    int matrix_dense = 0;
+    int matrix_zero = 0;
+    for (int i = 0; i < size; i++)
+	if (matrix[i] > 0) matrix_dense++;
+	else matrix_zero++;
+    printf("%s - dense ratio = %.3f\n", desc, (matrix_dense/(matrix_dense + matrix_zero)));
+}
+
+void cnn(float *images, float **network, int *labels, float *confidences, int num_images, int batch_size) {
     /*
      * TODO
      * Implement here.
@@ -599,7 +608,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     data_transfer_time = 0;
 
     // allocate memory for output of each layer
-    /*float *c1_1, *c1_2, *p1;
+    float *c1_1, *c1_2, *p1;
     float *c2_1, *c2_2, *p2;
     float *c3_1, *c3_2, *c3_3, *p3;
     float *c4_1, *c4_2, *c4_3, *p4;
@@ -627,7 +636,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     fc2  = alloc_layer(512);
     fc3  = alloc_layer(10);
 
-    float *c1_1_seq, *c1_2_seq, *p1_seq;
+    /*float *c1_1_seq, *c1_2_seq, *p1_seq;
     float *c2_1_seq, *c2_2_seq, *p2_seq;
     float *c3_1_seq, *c3_2_seq, *c3_3_seq, *p3_seq;
     float *c4_1_seq, *c4_2_seq, *c4_3_seq, *p4_seq;
@@ -693,6 +702,8 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     {
         // Copy image from host to device
         float *image = images + i * 3 * 32 * 32;
+        print_matrix(image, 3*32*32, "image");
+
         cudaEventRecord(start);
         cudaMemcpy(d_image, image, image_size, cudaMemcpyHostToDevice);
         cudaEventRecord(stop);
