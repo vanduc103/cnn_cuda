@@ -191,86 +191,6 @@ void softmax_kernel(
     }
 }
 
-/******************SEQ *************/
-
-static void pooling2x2(float *input, float *output, int N) {
-    int i, j, k, l;
-    for (i = 0; i < N; i++) {
-        for (j = 0; j < N; j++) {
-            float max = 0;
-            for (k = 0; k < 2; k++) {
-                for (l = 0; l < 2; l++) {
-                    float pixel = input[(i * 2 + k) * 2 * N + j * 2 + l];
-                    max = (max > pixel) ? max : pixel;
-                }
-            }
-            output[i * N + j] = max;
-        }
-    }
-}
-
-static void pooling_layer_seq(float *inputs, float *outputs, int D, int N) {
-    int i;
-    for (i = 0; i < D; i++) {
-        float * input = inputs + i * N * N * 4;
-        float * output = outputs + i * N * N;
-        pooling2x2(input, output, N);
-    }
-}
-
-static void convolution3x3(float *input, float *output, float *filter, int N) {
-    int i, j, k, l;
-    for (i = 0; i < N; i++) {
-        for (j = 0; j < N; j++) {
-            float sum = 0;
-            for (k = 0; k < 3; k++) {
-                for (l = 0; l < 3; l++) {
-                    int x = i + k - 1;
-                    int y = j + l - 1; 
-                    if (x >= 0 && x < N && y >= 0 && y < N)
-                        sum += input[x * N + y] * filter[k * 3 + l];
-                }
-            }
-            output[i * N + j] += sum;
-        }
-    }
-}
-
-#define ReLU(x) (((x)>0)?(x):0)
-static void convolution_layer_seq(float *inputs, float *outputs, float *filters, float *biases, int D2, int D1, int N) {
-    int i, j;
-
-    memset(outputs, 0, sizeof(float) * N * N * D2);
-
-    for (j = 0; j < D2; j++) {
-        for (i = 0; i < D1; i++) {
-            float * input = inputs + N * N * i;
-            float * output = outputs + N * N * j;
-            float * filter = filters + 3 * 3 * (j * D1 + i);
-            convolution3x3(input, output, filter, N); 
-        }
-    }
-
-    for (i = 0; i < D2; i++) {
-        float * output = outputs + N * N * i;
-        float bias = biases[i];
-        for (j = 0; j < N * N; j++) {
-            output[j] = ReLU(output[j] + bias);
-        }
-    }
-}
-
-static void fc_layer_seq(float *input_neuron, float *output_neuron, float *weights, float *biases, int M, int N) {
-    int i, j;
-    for (j = 0; j < M; j++) {
-        float sum = 0;
-        for (i = 0; i < N; i++) {
-            sum += input_neuron[i] * weights[j * N + i];
-        }
-        sum += biases[j];
-        output_neuron[j] = ReLU(sum);
-    }
-}
 
 /************************   CUDA   ************************/
 
@@ -482,7 +402,15 @@ void print_matrix(float *matrix, int size, const char *desc) {
     for (int i = 0; i < size; i++)
 	    if (matrix[i] > 0) matrix_dense++;
 	    else matrix_zero++;
-    printf("%s - dense ratio = %.3f\n", desc, ((float)matrix_dense/(matrix_dense + matrix_zero)));
+    //printf("%s - dense ratio = %.3f\n", desc, ((float)matrix_dense/(matrix_dense + matrix_zero)));
+}
+
+void compare_matrix(float *matrix1, float *matrix2, int size, const char *desc) {
+    int matrix_equal = 0;
+    for (int i = 0; i < size; i++) {
+	    if (matrix1[i] == matrix2[i]) matrix_equal++;
+    }
+    printf("%s - equal ratio = %.3f\n", desc, ((float)matrix_equal/size));
 }
 
 void cnn(float *images, float **network, int *labels, float *confidences, int num_images, int batch_size) {
@@ -636,7 +564,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     fc2  = alloc_layer(512);
     fc3  = alloc_layer(10);
 
-    /*float *c1_1_seq, *c1_2_seq, *p1_seq;
+    float *c1_1_seq, *c1_2_seq, *p1_seq;
     float *c2_1_seq, *c2_2_seq, *p2_seq;
     float *c3_1_seq, *c3_2_seq, *c3_3_seq, *p3_seq;
     float *c4_1_seq, *c4_2_seq, *c4_3_seq, *p4_seq;
@@ -662,7 +590,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     p5_seq   = alloc_layer(512 * 1 * 1);
     fc1_seq  = alloc_layer(512);
     fc2_seq  = alloc_layer(512);
-    fc3_seq = alloc_layer(10);*/
+    fc3_seq = alloc_layer(10);
     
     // Allocate output vectors in device memory to transfer between layers
     float *d_c1_1, *d_c1_2, *d_p1;
@@ -698,7 +626,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     size_t image_size = 3*32*32 * sizeof(float);
     float *d_image;
     cudaMalloc(&d_image, image_size);
-    for(int i = 0; i < num_images; ++i)
+    for(int i = 0; i < num_images; i=i+2)
     {
         // Copy image from host to device
         float *image = images + i * 3 * 32 * 32;
@@ -739,7 +667,22 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
         fc_layer(d_fc1, d_fc2, d_w2, d_b2, 512, 512);
         fc_layer(d_fc2, d_fc3, d_w3, d_b3, 10, 512);
 
-        cudaMemcpy(c1_1, d_c1_1, OUTPUT_SIZES[0] * sizeof(float), cudaMemcpyDeviceToHost);
+        // Copy result from device memory to host memory
+        cudaEventRecord(start);
+        cudaMemcpy(fc3, d_fc3, OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        data_transfer_time += milliseconds;
+
+        // Get the predicted label
+        softmax(fc3, 10);        
+        labels[i] = find_max(fc3, 10);
+        confidences[i] = fc3[labels[i]];
+
+	// print matrix dense
+	cudaMemcpy(c1_1, d_c1_1, OUTPUT_SIZES[0] * sizeof(float), cudaMemcpyDeviceToHost);
         print_matrix(c1_1, OUTPUT_SIZES[0], "c1_1");
         cudaMemcpy(c1_2, d_c1_2, OUTPUT_SIZES[1] * sizeof(float), cudaMemcpyDeviceToHost);
         print_matrix(c1_2, OUTPUT_SIZES[1], "c1_2");
@@ -781,7 +724,47 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
         print_matrix(fc2, OUTPUT_SIZES[19], "fc2");
         cudaMemcpy(fc3, d_fc3, OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
         print_matrix(fc3, OUTPUT_SIZES[20], "fc3");
-        
+
+	/*************************/
+	// Copy image from host to device
+        float *image1 = images + (i+1) * 3 * 32 * 32;
+        compare_matrix(image, image1, 3*32*32, "image");
+
+        cudaEventRecord(start);
+        cudaMemcpy(d_image, image1, image_size, cudaMemcpyHostToDevice);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        data_transfer_time += milliseconds;
+
+        convolution_layer_v1(d_image, d_c1_1, d_w1_1, d_b1_1, 64, 3, 32);
+        convolution_layer_v1(d_c1_1, d_c1_2, d_w1_2, d_b1_2, 64, 64, 32);
+        pooling_layer(d_c1_2, d_p1, 64, 16);
+
+        convolution_layer_v1(d_p1, d_c2_1, d_w2_1, d_b2_1, 128, 64, 16);
+        convolution_layer_v1(d_c2_1, d_c2_2, d_w2_2, d_b2_2, 128, 128, 16);
+        pooling_layer(d_c2_2, d_p2, 128, 8);
+
+        convolution_layer_v1(d_p2, d_c3_1, d_w3_1, d_b3_1, 256, 128, 8);
+        convolution_layer_v1(d_c3_1, d_c3_2, d_w3_2, d_b3_2, 256, 256, 8);
+        convolution_layer_v1(d_c3_2, d_c3_3, d_w3_3, d_b3_3, 256, 256, 8);
+        pooling_layer(d_c3_3, d_p3, 256, 4);
+
+        convolution_layer_v1(d_p3, d_c4_1, d_w4_1, d_b4_1, 512, 256, 4);
+        convolution_layer_v1(d_c4_1, d_c4_2, d_w4_2, d_b4_2, 512, 512, 4);
+        convolution_layer_v1(d_c4_2, d_c4_3, d_w4_3, d_b4_3, 512, 512, 4);
+        pooling_layer(d_c4_3, d_p4, 512, 2);
+
+        convolution_layer_v1(d_p4, d_c5_1, d_w5_1, d_b5_1, 512, 512, 2);
+        convolution_layer_v1(d_c5_1, d_c5_2, d_w5_2, d_b5_2, 512, 512, 2);
+        convolution_layer_v1(d_c5_2, d_c5_3, d_w5_3, d_b5_3, 512, 512, 2);
+        pooling_layer(d_c5_3, d_p5, 512, 1);
+
+        fc_layer(d_p5, d_fc1, d_w1, d_b1, 512, 512);
+        fc_layer(d_fc1, d_fc2, d_w2, d_b2, 512, 512);
+        fc_layer(d_fc2, d_fc3, d_w3, d_b3, 10, 512);
+
         // Copy result from device memory to host memory
         cudaEventRecord(start);
         cudaMemcpy(fc3, d_fc3, OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
@@ -793,8 +776,52 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
 
         // Get the predicted label
         softmax(fc3, 10);        
-        labels[i] = find_max(fc3, 10);
-        confidences[i] = fc3[labels[i]];
+        labels[i+1] = find_max(fc3, 10);
+        confidences[i] = fc3[labels[i+1]];
+
+	// print matrix dense
+	cudaMemcpy(c1_1_seq, d_c1_1, OUTPUT_SIZES[0] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c1_1, c1_1_seq, OUTPUT_SIZES[0], "c1_1");
+        cudaMemcpy(c1_2_seq, d_c1_2, OUTPUT_SIZES[1] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c1_2, c1_2_seq, OUTPUT_SIZES[1], "c1_2");
+        cudaMemcpy(p1_seq, d_p1, OUTPUT_SIZES[2] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(p1, p1_seq, OUTPUT_SIZES[2], "p1");
+        cudaMemcpy(c2_1_seq, d_c2_1, OUTPUT_SIZES[3] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c2_1, c2_1_seq, OUTPUT_SIZES[3], "c2_1");
+        cudaMemcpy(c2_2_seq, d_c2_2, OUTPUT_SIZES[4] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c2_2, c2_2_seq, OUTPUT_SIZES[4], "c2_2");
+        cudaMemcpy(p2_seq, d_p2, OUTPUT_SIZES[5] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(p2, p2_seq, OUTPUT_SIZES[5], "p2");
+        cudaMemcpy(c3_1_seq, d_c3_1, OUTPUT_SIZES[6] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c3_1, c3_1_seq, OUTPUT_SIZES[6], "c3_1");
+        cudaMemcpy(c3_2_seq, d_c3_2, OUTPUT_SIZES[7] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c3_2, c3_2_seq, OUTPUT_SIZES[7], "c3_2");
+        cudaMemcpy(c3_3_seq, d_c3_3, OUTPUT_SIZES[8] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c3_3, c3_3_seq, OUTPUT_SIZES[8], "c3_3");
+        cudaMemcpy(p3_seq, d_p3, OUTPUT_SIZES[9] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(p3, p3_seq, OUTPUT_SIZES[9], "p3");
+        cudaMemcpy(c4_1_seq, d_c4_1, OUTPUT_SIZES[10] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c4_1, c4_1_seq, OUTPUT_SIZES[10], "c4_1");
+        cudaMemcpy(c4_2_seq, d_c4_2, OUTPUT_SIZES[11] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c4_2, c4_2_seq, OUTPUT_SIZES[11], "c4_2");
+        cudaMemcpy(c4_3_seq, d_c4_3, OUTPUT_SIZES[12] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c4_3, c4_3_seq, OUTPUT_SIZES[12], "c4_3");
+        cudaMemcpy(p4_seq, d_p4, OUTPUT_SIZES[13] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(p4, p4_seq, OUTPUT_SIZES[13], "p4");
+        cudaMemcpy(c5_1_seq, d_c5_1, OUTPUT_SIZES[14] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c5_1, c5_1_seq, OUTPUT_SIZES[14], "c5_1");
+        cudaMemcpy(c5_2_seq, d_c5_2, OUTPUT_SIZES[15] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c5_2, c5_2_seq, OUTPUT_SIZES[15], "c5_2");
+        cudaMemcpy(c5_3_seq, d_c5_3, OUTPUT_SIZES[16] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(c5_3, c5_3_seq, OUTPUT_SIZES[16], "c5_3");
+        cudaMemcpy(p5_seq, d_p5, OUTPUT_SIZES[17] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(p5, p5_seq, OUTPUT_SIZES[17], "p5");
+        cudaMemcpy(fc1_seq, d_fc1, OUTPUT_SIZES[18] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(fc1, fc1_seq, OUTPUT_SIZES[18], "fc1");
+        cudaMemcpy(fc2_seq, d_fc2, OUTPUT_SIZES[19] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(fc2, fc2_seq, OUTPUT_SIZES[19], "fc2");
+        cudaMemcpy(fc3_seq, d_fc3, OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
+        compare_matrix(fc3, fc3_seq, OUTPUT_SIZES[20], "fc3");
     }
     printf("data transfer time = %f ms\n", data_transfer_time);
     printf("pooing time = %f ms\n", pooling_time);
