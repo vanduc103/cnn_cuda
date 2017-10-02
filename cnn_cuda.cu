@@ -480,9 +480,9 @@ void print_matrix(float *matrix, int size, const char *desc) {
     int matrix_dense = 0;
     int matrix_zero = 0;
     for (int i = 0; i < size; i++)
-	if (matrix[i] > 0) matrix_dense++;
-	else matrix_zero++;
-    printf("%s - dense ratio = %.3f\n", desc, (matrix_dense/(matrix_dense + matrix_zero)));
+	    if (matrix[i] > 0) matrix_dense++;
+	    else matrix_zero++;
+    printf("%s - dense ratio = %.3f\n", desc, ((float)matrix_dense/(matrix_dense + matrix_zero)));
 }
 
 void cnn(float *images, float **network, int *labels, float *confidences, int num_images, int batch_size) {
