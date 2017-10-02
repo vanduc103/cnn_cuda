@@ -626,7 +626,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     size_t image_size = 3*32*32 * sizeof(float);
     float *d_image;
     cudaMalloc(&d_image, image_size);
-    for(int i = 0; i < num_images; i=i+2)
+    for(int i = 0; i < num_images; i++)
     {
         // Copy image from host to device
         float *image = images + i * 3 * 32 * 32;
@@ -680,6 +680,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
         softmax(fc3, 10);        
         labels[i] = find_max(fc3, 10);
         confidences[i] = fc3[labels[i]];
+        printf("Image: %d, confidences = %.3f \n", labels[i], confidences[i]);
 
 	// print matrix dense
 	cudaMemcpy(c1_1, d_c1_1, OUTPUT_SIZES[0] * sizeof(float), cudaMemcpyDeviceToHost);
@@ -777,7 +778,8 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
         // Get the predicted label
         softmax(fc3, 10);        
         labels[i+1] = find_max(fc3, 10);
-        confidences[i] = fc3[labels[i+1]];
+        confidences[i+1] = fc3[labels[i+1]];
+        printf("Image: %d, confidences = %.3f \n", labels[i+1], confidences[i+1]);
 
 	// print matrix dense
 	cudaMemcpy(c1_1_seq, d_c1_1, OUTPUT_SIZES[0] * sizeof(float), cudaMemcpyDeviceToHost);
