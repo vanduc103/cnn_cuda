@@ -603,6 +603,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
     // Images will processed by batch
     for(int i = start_num_images; i < num_images; i += batchImg)
     {
+        printf("i = %d\n", i);
         // Copy image from host to device
         float *image = images + i * 3 * 32 * 32;
         

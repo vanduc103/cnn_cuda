@@ -140,14 +140,7 @@ void convolution_v3(
    // Store each work-item’s unique row and column
    int x1 = blockIdx.x * blockDim.x + threadIdx.x; // x1 is output index
 
-   if (x1 < N*N*D2*NoImg) {
-        float sum = 0;
-        for (int i = 0; i < D1; i++) {
-            for (int j = 0; j < 3; j++)
-                for (int t = 0; t < 3; t++)
-                    sum += 
-        }     
-   }
+   
 }
 
 
@@ -452,7 +445,7 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
 
     // view networks values
     for (int i = 0; i < NETWORK_SIZES[0]; i++) {
-        printf("w1_1[%d] = %f\n", i, w1_1[i]);
+        //printf("w1_1[%d] = %f\n", i, w1_1[i]);
     }
 
     // Allocate vectors in device memory
@@ -547,18 +540,20 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
 
     // Batch images size
     int batchImg = batch_size;
+    int batchImg2 = 2*batchImg;
     printf("batch size = %d\n", batchImg);
 
     // Allocate output vectors in device memory to transfer between layers
-    float *d_c1_1, *d_c1_2, *d_p1;
+    /*float *d_c1_1, *d_c1_2, *d_p1;
     float *d_c2_1, *d_c2_2, *d_p2;
     float *d_c3_1, *d_c3_2, *d_c3_3, *d_p3;
     float *d_c4_1, *d_c4_2, *d_c4_3, *d_p4;
     float *d_c5_1, *d_c5_2, *d_c5_3, *d_p5;
-    float *d_fc1, *d_fc2, *d_fc3;
-    float *d1, *d2;
+    float *d_fc1, *d_fc2, *d_fc3;*/
+    float *d1, *d2, *p1;
     cudaMalloc(&d1, batchImg * OUTPUT_SIZES[0] * sizeof(float));
     cudaMalloc(&d2, batchImg * OUTPUT_SIZES[1] * sizeof(float));
+    cudaMalloc(&p1, batchImg * OUTPUT_SIZES[2] * sizeof(float));
     /*cudaMalloc(&d_p1,   batchImg * OUTPUT_SIZES[2] * sizeof(float));
     cudaMalloc(&d_c2_1, batchImg * OUTPUT_SIZES[3] * sizeof(float));
     cudaMalloc(&d_c2_2, batchImg * OUTPUT_SIZES[4] * sizeof(float));
@@ -588,8 +583,10 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
 
     int start_num_images = num_images%batchImg;
     // Images will processed by batch
-    for(int i = start_num_images; i < num_images; i += batchImg)
+    for(int i = start_num_images; i < num_images; i += batchImg2)
     {
+        printf("i = %d\n", i);
+        batchImg = batch_size;
         // Copy image from host to device
         float *image = images + i * 3 * 32 * 32;
         
@@ -602,6 +599,92 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
         data_transfer_time += milliseconds/1000;
 
         convolution_layer_v2(d_image, d1, d_w1_1, d_b1_1, 64, 3, 32, batchImg);
+        convolution_layer_v2(d1, d2, d_w1_2, d_b1_2, 64, 64, 32, batchImg);
+        pooling_layer(d2, p1, 64, 16, batchImg);
+
+        /////////////////
+        // Copy image from host to device
+        image = images + (i+batchImg) * 3 * 32 * 32;
+        
+        cudaEventRecord(start);
+        cudaMemcpy(d_image, image, image_size, cudaMemcpyHostToDevice);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        data_transfer_time += milliseconds/1000;
+
+        convolution_layer_v2(d_image, d1, d_w1_1, d_b1_1, 64, 3, 32, batchImg);
+        convolution_layer_v2(d1, d2, d_w1_2, d_b1_2, 64, 64, 32, batchImg);
+        pooling_layer(d2, d1, 64, 16, batchImg);
+
+        // copy p1 to d1
+        batchImg = batchImg2;
+        ////////////////
+
+        convolution_layer_v2(d2, d1, d_w2_1, d_b2_1, 128, 64, 16, batchImg);
+        convolution_layer_v2(d1, d2, d_w2_2, d_b2_2, 128, 128, 16, batchImg);
+        pooling_layer(d2, d1, 128, 8, batchImg);
+
+        convolution_layer_v2(d1, d2, d_w3_1, d_b3_1, 256, 128, 8, batchImg);
+        convolution_layer_v2(d2, d1, d_w3_2, d_b3_2, 256, 256, 8, batchImg);
+        convolution_layer_v2(d1, d2, d_w3_3, d_b3_3, 256, 256, 8, batchImg);
+        pooling_layer(d2, d1, 256, 4, batchImg);
+
+        convolution_layer_v2(d1, d2, d_w4_1, d_b4_1, 512, 256, 4, batchImg);
+        convolution_layer_v2(d2, d1, d_w4_2, d_b4_2, 512, 512, 4, batchImg);
+        convolution_layer_v2(d1, d2, d_w4_3, d_b4_3, 512, 512, 4, batchImg);
+        pooling_layer(d2, d1, 512, 2, batchImg);
+
+        convolution_layer_v2(d1, d2, d_w5_1, d_b5_1, 512, 512, 2, batchImg);
+        convolution_layer_v2(d2, d1, d_w5_2, d_b5_2, 512, 512, 2, batchImg);
+        convolution_layer_v2(d1, d2, d_w5_3, d_b5_3, 512, 512, 2, batchImg);
+        pooling_layer(d2, d1, 512, 1, batchImg);
+
+        fc_layer(d1, d2, d_w1, d_b1, 512, 512, batchImg);
+        fc_layer(d2, d1, d_w2, d_b2, 512, 512, batchImg);
+        fc_layer(d1, d2, d_w3, d_b3, 10, 512, batchImg);
+
+        // Copy result from device memory to host memory
+        float *fc3_mul  = alloc_layer(OUTPUT_SIZES[20] * batchImg);
+        cudaEventRecord(start);
+        cudaMemcpy(fc3_mul, d2, batchImg * OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        data_transfer_time += milliseconds/1000;
+
+        // Predicted labels
+        for (int j = 0; j < batchImg; j++) {
+            float *fc3 = fc3_mul + j*10;
+            softmax(fc3, 10);
+            int idx = i + j;
+            labels[idx] = find_max(fc3, 10);
+            confidences[idx] = fc3[labels[idx]];
+        }
+        free(fc3_mul);
+    }
+    
+
+    /*// The remaining images
+    size_t image_size2 = start_num_images*3*32*32 * sizeof(float);
+    float *d_image2;
+    batchImg = start_num_images;
+    for(int i = 0; i < start_num_images; i += start_num_images)
+    {
+        // Copy image from host to device
+        float *image = images + i * 3 * 32 * 32;
+        cudaEventRecord(start);
+        cudaMalloc(&d_image2, image_size2);
+        cudaMemcpy(d_image2, image, image_size2, cudaMemcpyHostToDevice);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        data_transfer_time += milliseconds/1000;
+
+        convolution_layer_v2(d_image2, d1, d_w1_1, d_b1_1, 64, 3, 32, batchImg);
         convolution_layer_v2(d1, d2, d_w1_2, d_b1_2, 64, 64, 32, batchImg);
         pooling_layer(d2, d1, 64, 16, batchImg);
 
@@ -647,391 +730,8 @@ void cnn(float *images, float **network, int *labels, float *confidences, int nu
             confidences[idx] = fc3[labels[idx]];
         }
         free(fc3_mul);
-        cudaFree(d_fc3);
     }
-    cudaFree(d_image);
-
-    // The remaining images
-    size_t image_size2 = start_num_images*3*32*32 * sizeof(float);
-    float *d_image2;
-    batchImg = start_num_images;
-    for(int i = 0; i < start_num_images; i += start_num_images)
-    {
-        // Copy image from host to device
-        float *image = images + i * 3 * 32 * 32;
-        cudaEventRecord(start);
-        cudaMalloc(&d_image2, image_size2);
-        cudaMemcpy(d_image2, image, image_size2, cudaMemcpyHostToDevice);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c1_1, batchImg * OUTPUT_SIZES[0] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_image2, d_c1_1, d_w1_1, d_b1_1, 64, 3, 32, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_image2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c1_2, batchImg * OUTPUT_SIZES[1] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c1_1, d_c1_2, d_w1_2, d_b1_2, 64, 64, 32, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c1_1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_p1,   batchImg * OUTPUT_SIZES[2] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        pooling_layer(d_c1_2, d_p1, 64, 16, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c1_2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c2_1, batchImg * OUTPUT_SIZES[3] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_p1, d_c2_1, d_w2_1, d_b2_1, 128, 64, 16, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_p1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c2_2, batchImg * OUTPUT_SIZES[4] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c2_1, d_c2_2, d_w2_2, d_b2_2, 128, 128, 16, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c2_1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_p2,   batchImg * OUTPUT_SIZES[5] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        pooling_layer(d_c2_2, d_p2, 128, 8, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c2_2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c3_1, batchImg * OUTPUT_SIZES[6] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_p2, d_c3_1, d_w3_1, d_b3_1, 256, 128, 8, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_p2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaMalloc(&d_c3_2, batchImg * OUTPUT_SIZES[7] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c3_1, d_c3_2, d_w3_2, d_b3_2, 256, 256, 8, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c3_1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c3_3, batchImg * OUTPUT_SIZES[8] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c3_2, d_c3_3, d_w3_3, d_b3_3, 256, 256, 8, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c3_2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaMalloc(&d_p3, batchImg * OUTPUT_SIZES[9] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        pooling_layer(d_c3_3, d_p3, 256, 4, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c3_3);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c4_1, batchImg * OUTPUT_SIZES[10] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_p3, d_c4_1, d_w4_1, d_b4_1, 512, 256, 4, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_p3);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c4_2, batchImg * OUTPUT_SIZES[11] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c4_1, d_c4_2, d_w4_2, d_b4_2, 512, 512, 4, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c4_1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaMalloc(&d_c4_3, batchImg * OUTPUT_SIZES[12] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c4_2, d_c4_3, d_w4_3, d_b4_3, 512, 512, 4, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c4_2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_p4, batchImg * OUTPUT_SIZES[13] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        pooling_layer(d_c4_3, d_p4, 512, 2, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c4_3);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c5_1, batchImg * OUTPUT_SIZES[14] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_p4, d_c5_1, d_w5_1, d_b5_1, 512, 512, 2, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_p4);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c5_2, batchImg * OUTPUT_SIZES[15] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c5_1, d_c5_2, d_w5_2, d_b5_2, 512, 512, 2, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c5_1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_c5_3, batchImg * OUTPUT_SIZES[16] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        convolution_layer_v2(d_c5_2, d_c5_3, d_w5_3, d_b5_3, 512, 512, 2, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c5_2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_p5, batchImg * OUTPUT_SIZES[17] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        pooling_layer(d_c5_3, d_p5, 512, 1, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_c5_3);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_fc1, batchImg * OUTPUT_SIZES[18] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        fc_layer(d_p5, d_fc1, d_w1, d_b1, 512, 512, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_p5);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_fc2,  batchImg * OUTPUT_SIZES[19] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        fc_layer(d_fc1, d_fc2, d_w2, d_b2, 512, 512, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_fc1);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        cudaEventRecord(start);
-        cudaMalloc(&d_fc3,  batchImg * OUTPUT_SIZES[20] * sizeof(float));
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-        fc_layer(d_fc2, d_fc3, d_w3, d_b3, 10, 512, batchImg);
-        cudaEventRecord(start);
-        cudaFree(d_fc2);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        // Copy result from device memory to host memory
-        float *fc3_mul  = alloc_layer(OUTPUT_SIZES[20] * batchImg);
-        cudaEventRecord(start);
-        cudaMemcpy(fc3_mul, d_fc3, batchImg * OUTPUT_SIZES[20] * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-
-        // Predicted labels
-        for (int j = 0; j < batchImg; j++) {
-            float *fc3 = fc3_mul + j*10;
-            softmax(fc3, 10);
-            int idx = i + j;
-            labels[idx] = find_max(fc3, 10);
-            confidences[idx] = fc3[labels[idx]];
-        }
-        free(fc3_mul);
-
-        cudaEventRecord(start);
-        cudaFree(d_fc3);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        data_transfer_time += milliseconds/1000;
-    }
+    cudaFree(d_image2);*/
     printf("data transfer time = %f s\n", data_transfer_time);
     printf("pooing time = %f s\n", pooling_time);
     printf("convolution time = %f s\n", conv_time);
