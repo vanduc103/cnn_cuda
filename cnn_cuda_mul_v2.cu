@@ -123,25 +123,6 @@ void convolution_v2(
     }
 }
 
-// Fusing 2 convolution layers
-__global__
-void convolution_v3(
-   float * inputs,
-   float * outputs,
-   float * filters1,
-   float * filters2,
-   float * biases1,
-   float * biases2,
-   int N,
-   int D1, 
-   int D2,
-   int NoImg)
-{
-   // Store each work-item’s unique row and column
-   int x1 = blockIdx.x * blockDim.x + threadIdx.x; // x1 is output index
-
-   
-}
 
 
 __global__
@@ -212,8 +193,8 @@ static void show_mem_gpu(const char *info) {
     double total_db = (double)total_byte ;
     double used_db = total_db - free_db ;
 
-    printf("%s - GPU memory usage: used = %.3f MB, free = %.3f MB, total = %.3f MB\n",
-        info, used_db/1024.0/1024.0, free_db/1024.0/1024.0, total_db/1024.0/1024.0);
+    //printf("%s - GPU memory usage: used = %.3f MB, free = %.3f MB, total = %.3f MB\n",
+    //    info, used_db/1024.0/1024.0, free_db/1024.0/1024.0, total_db/1024.0/1024.0);
 }
 
 float data_transfer_time = 0;
@@ -272,6 +253,7 @@ static void convolution_layer_v1(float *inputs, float *outputs, float *filters, 
 
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("conv time: %f ms\n", milliseconds);
     conv_time += milliseconds/1000;
 }
 
@@ -293,6 +275,7 @@ static void convolution_layer_v2(float *inputs, float *outputs, float *filters, 
 
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("conv time: %f ms\n", milliseconds);
     conv_time += milliseconds/1000;
 }
 
